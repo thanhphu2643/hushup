@@ -1,0 +1,4 @@
+target/
+dist/
+app/.build/
+.DS_Store
