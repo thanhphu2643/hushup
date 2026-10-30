@@ -4,6 +4,9 @@
 //! 2. Badges: drop `RecommendedUpdates` (what System Settings counts for the red
 //!    "1" and the "Software Update Available" row) plus the per-user badge keys.
 //! 3. Hosts: point Apple's update servers at 0.0.0.0 so a scan can't refill them.
+//! 4. Cache: softwareupdated keeps earlier scan results in memory and in
+//!    `/Library/Updates/ProductMetadata.plist`, and the badge survives 1-3 until
+//!    those are flushed too.
 //!
 //! A launchd daemon re-runs `enforce` whenever softwareupdated rewrites its prefs.
 
@@ -13,6 +16,8 @@ use std::io::Cursor;
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::sleep;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use plist::{Dictionary, Value};
@@ -52,6 +57,13 @@ const STATE_FILE: &str = "/Library/Application Support/hushup/state.json";
 const DAEMON_LABEL: &str = "io.github.hushup";
 const DAEMON_PLIST: &str = "/Library/LaunchDaemons/io.github.hushup.plist";
 const INSTALL_PATH: &str = "/usr/local/bin/hushup";
+
+const PRODUCT_METADATA: &str = "/Library/Updates/ProductMetadata.plist";
+const PRODUCT_METADATA_BAK: &str = "/Library/Application Support/hushup/ProductMetadata.plist.bak";
+const FLUSH_MARKER: &str = "/Library/Application Support/hushup/last-flush";
+/// Restarting softwareupdated can rewrite its prefs, which re-triggers the WatchPaths
+/// daemon; this keeps that from turning into a restart loop.
+const FLUSH_COOLDOWN: Duration = Duration::from_secs(600);
 
 static DRY_RUN: AtomicBool = AtomicBool::new(false);
 
@@ -99,7 +111,7 @@ impl Saved {
 pub fn status() -> Result<Status> {
     let su = export(Command::new("defaults"), SU_SYSTEM);
     let on = |key: &str| su.get(key).and_then(Value::as_boolean).unwrap_or(true);
-    let pending_updates = su
+    let mut pending_updates: Vec<String> = su
         .get("RecommendedUpdates")
         .and_then(Value::as_array)
         .map(|updates| {
@@ -109,6 +121,11 @@ pub fn status() -> Result<Status> {
                 .collect()
         })
         .unwrap_or_default();
+    for title in cached_updates() {
+        if !pending_updates.contains(&title) {
+            pending_updates.push(title);
+        }
+    }
     let notification_count = user_defaults()
         .map(|cmd| export(cmd, SU_USER))
         .and_then(|d| d.get("AvailableUpdatesNotificationCountKey")?.as_signed_integer())
@@ -135,7 +152,7 @@ pub fn apply(opts: &Opts) -> Result<()> {
     }
     state.opts = opts.clone();
     write_file(STATE_FILE, &serde_json::to_string_pretty(&state)?)?;
-    enforce_with(&state)?;
+    enforce_with(&state, true)?;
     println!("updates blocked; run `sudo hushup install-daemon` to keep the badge away");
     Ok(())
 }
@@ -143,13 +160,13 @@ pub fn apply(opts: &Opts) -> Result<()> {
 pub fn enforce() -> Result<()> {
     require_root()?;
     match load_state() {
-        Some(state) => enforce_with(&state),
+        Some(state) => enforce_with(&state, false),
         None => Ok(()), // never applied, nothing to keep
     }
 }
 
 /// Idempotent: only writes what drifted, so the WatchPaths daemon doesn't loop on its own writes.
-fn enforce_with(state: &State) -> Result<()> {
+fn enforce_with(state: &State, force_flush: bool) -> Result<()> {
     let su = export(Command::new("defaults"), SU_SYSTEM);
     for key in pref_keys(&state.opts) {
         if su.get(key).and_then(Value::as_boolean) != Some(false) {
@@ -160,7 +177,56 @@ fn enforce_with(state: &State) -> Result<()> {
         mutate(Command::new("defaults").args(["delete", SU_SYSTEM, "RecommendedUpdates"]))?;
     }
     set_hosts_block(state.opts.hosts)?;
-    clear_user_badge()
+    clear_user_badge()?;
+    flush_cached_updates(force_flush)
+}
+
+/// Makes softwareupdated forget updates it already found. With the hosts block in
+/// place, the rescan it does on restart comes back empty.
+fn flush_cached_updates(force: bool) -> Result<()> {
+    let recent = fs::metadata(FLUSH_MARKER)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < FLUSH_COOLDOWN);
+    if (recent && !force) || cached_updates().is_empty() {
+        return Ok(());
+    }
+    write_file(FLUSH_MARKER, "")?;
+    restart_softwareupdated()?;
+    if !cached_updates().is_empty() && Path::new(PRODUCT_METADATA).exists() {
+        // The on-disk cache survived the restart. It's rebuilt by the next real scan.
+        move_file(PRODUCT_METADATA, PRODUCT_METADATA_BAK)?;
+        restart_softwareupdated()?;
+    }
+    mutate(Command::new("killall").arg("Dock")).ok();
+    Ok(())
+}
+
+fn restart_softwareupdated() -> Result<()> {
+    let kickstart = mutate(Command::new("launchctl").args(["kickstart", "-k", "system/com.apple.softwareupdated"]));
+    if kickstart.is_err() {
+        // launchd starts it again on demand.
+        mutate(Command::new("killall").arg("softwareupdated"))?;
+    }
+    if !dry_run() {
+        sleep(Duration::from_secs(5));
+    }
+    Ok(())
+}
+
+/// Titles of updates softwareupdated still holds from earlier scans. `--no-scan` never hits the network.
+fn cached_updates() -> Vec<String> {
+    output(Command::new("softwareupdate").args(["--list", "--no-scan"]))
+        .map(|out| parse_update_titles(&out))
+        .unwrap_or_default()
+}
+
+fn parse_update_titles(list: &str) -> Vec<String> {
+    list.lines()
+        .filter_map(|line| line.trim().strip_prefix("Title: "))
+        .map(|rest| rest.split(", Version:").next().unwrap_or(rest).to_string())
+        .collect()
 }
 
 pub fn restore() -> Result<()> {
@@ -346,10 +412,19 @@ fn write_file(path: &str, contents: &str) -> Result<()> {
         println!("would write {path}:\n{contents}");
         return Ok(());
     }
-    if path == STATE_FILE {
+    if path.starts_with(STATE_DIR) {
         fs::create_dir_all(STATE_DIR)?;
     }
     fs::write(path, contents).with_context(|| format!("writing {path}"))
+}
+
+fn move_file(from: &str, to: &str) -> Result<()> {
+    if dry_run() {
+        println!("would move {from} -> {to}");
+        return Ok(());
+    }
+    fs::create_dir_all(STATE_DIR)?;
+    fs::rename(from, to).with_context(|| format!("moving {from}"))
 }
 
 fn remove_file(path: &str) -> Result<()> {
@@ -381,6 +456,15 @@ mod tests {
     fn hosts_block_keeps_lines_after_it() {
         let on = with_hosts_block(BASE, true) + "10.0.0.1 nas\n";
         assert_eq!(with_hosts_block(&on, false), format!("{BASE}\n10.0.0.1 nas\n"));
+    }
+
+    #[test]
+    fn parses_cached_update_titles() {
+        let list = "Software Update Tool\n\nSoftware Update found the following new or updated software:\n\
+                    * Label: Command Line Tools for Xcode 27.2-27.2\n\
+                    \tTitle: Command Line Tools for Xcode 27.2, Version: 27.2, Size: 521120KiB, Recommended: YES, \n";
+        assert_eq!(parse_update_titles(list), ["Command Line Tools for Xcode 27.2"]);
+        assert!(parse_update_titles("No new software available.\n").is_empty());
     }
 
     #[test]
