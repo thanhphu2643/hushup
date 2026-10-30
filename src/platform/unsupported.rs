@@ -1,11 +1,11 @@
-//! Linux is on the roadmap; until then every command says so.
+//! Anything that isn't macOS, Windows or Linux.
 
 use anyhow::{bail, Result};
 
 use super::{Opts, Status};
 
 fn todo<T>() -> Result<T> {
-    bail!("hushup does not support {} yet (macOS and Windows only for now)", std::env::consts::OS)
+    bail!("hushup does not support {} yet (macOS, Windows and Linux only)", std::env::consts::OS)
 }
 
 pub fn status() -> Result<Status> {

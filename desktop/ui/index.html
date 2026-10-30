@@ -51,11 +51,29 @@
   <div class="card" id="rows"></div>
   <div class="error" id="error"></div>
   <button id="action" disabled>…</button>
-  <p class="note">Windows asks for administrator permission each time you switch.</p>
+  <p class="note" id="note">You'll be asked for administrator permission each time you switch.</p>
 <script>
   const { invoke } = window.__TAURI__.core;
   const $ = (id) => document.getElementById(id);
   let blocked = false;
+  let os = 'windows';
+
+  // Each row: [label, is it in the blocked state?]
+  const ROWS = {
+    windows: (s) => [
+      ['Automatic updates off', !s.auto_check],
+      ['Pinned to the installed Windows version', !s.auto_install_os],
+      ['Update notifications hidden', s.notifications_hidden],
+      ['Background guard (hourly)', s.daemon_installed],
+    ],
+    linux: (s) => [
+      ['Automatic apt updates off', !s.auto_check],
+      ['Snap auto-refresh held', !s.auto_download],
+      ['No new-release prompts', !s.auto_install_os],
+      ['Update notifications hidden', s.notifications_hidden],
+      ['Background guard (hourly)', s.daemon_installed],
+    ],
+  };
 
   function row(label, ok) {
     const el = document.createElement('div');
@@ -72,15 +90,11 @@
   function render(s) {
     blocked = s.applied && s.daemon_installed;
     $('title').textContent = blocked ? 'Updates are blocked' : 'Updates are allowed';
+    const system = os === 'windows' ? 'Windows' : 'Your system';
     $('sub').textContent = blocked
-      ? "Windows won't download, install or nag you about updates."
-      : 'Windows Update runs and notifies as usual.';
-    $('rows').replaceChildren(
-      row('Automatic updates off', !s.auto_check),
-      row('Pinned to the installed Windows version', !s.auto_install_os),
-      row('Update notifications hidden', s.notifications_hidden),
-      row('Background guard (hourly)', s.daemon_installed),
-    );
+      ? `${system} won't download, install or nag you about updates.`
+      : 'Updates run and notify as usual.';
+    $('rows').replaceChildren(...(ROWS[os] || ROWS.windows)(s).map(([label, ok]) => row(label, ok)));
     const btn = $('action');
     btn.disabled = false;
     btn.textContent = blocked ? 'Restore Updates' : 'Block Updates';
@@ -108,7 +122,7 @@
     await refresh();
   });
 
-  refresh();
+  invoke('os').then((name) => { os = name; }).finally(refresh);
 </script>
 </body>
 </html>

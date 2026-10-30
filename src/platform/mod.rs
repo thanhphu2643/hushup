@@ -2,7 +2,7 @@
 //! `status`, `apply`, `enforce`, `restore`, `install_daemon`, `uninstall_daemon`.
 //! Shared plumbing (dry-run, running commands, writing files) lives here.
 
-#![cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+#![cfg_attr(not(any(target_os = "macos", windows, target_os = "linux")), allow(dead_code))]
 
 use std::fmt;
 use std::fs;
@@ -23,9 +23,14 @@ mod windows;
 #[cfg(windows)]
 pub use windows::*;
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::*;
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 mod unsupported;
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 pub use unsupported::*;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -41,7 +46,7 @@ pub struct Status {
     pub applied: bool,
     pub auto_check: bool,
     pub auto_download: bool,
-    /// macOS: installs macOS updates on its own. Windows: may move to a newer feature release.
+    /// macOS: installs macOS updates on its own. Windows/Linux: may move to a newer release.
     pub auto_install_os: bool,
     pub pending_updates: Vec<String>,
     pub notification_count: i64,

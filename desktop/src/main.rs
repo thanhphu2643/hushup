@@ -1,7 +1,7 @@
 // No console window for the GUI in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! HushUp desktop app (Windows). The same exe doubles as the CLI when given
+//! HushUp desktop app (Windows, Linux). The same exe doubles as the CLI when given
 //! arguments, so elevated actions and the scheduled task need nothing else.
 
 use hushup::platform::{self, Status};
@@ -15,9 +15,14 @@ fn main() {
         return;
     }
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![status, block, restore])
+        .invoke_handler(tauri::generate_handler![os, status, block, restore])
         .run(tauri::generate_context!())
         .expect("error while running HushUp");
+}
+
+#[tauri::command]
+fn os() -> &'static str {
+    std::env::consts::OS
 }
 
 #[tauri::command]
@@ -62,7 +67,26 @@ fn elevated(args: &str) -> Result<(), String> {
     }
 }
 
-#[cfg(not(windows))]
+/// Re-runs this exe as the CLI through polkit (the desktop's password prompt).
+#[cfg(target_os = "linux")]
+fn elevated(args: &str) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let status = std::process::Command::new("pkexec")
+        .arg(exe)
+        .args(args.split(' '))
+        .status()
+        .map_err(|e| format!("pkexec: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Not applied (password declined, or `HushUp {args}` failed with {status}). \
+             Run `sudo hushup {args}` in a terminal to see the error."
+        ))
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn elevated(_: &str) -> Result<(), String> {
     Err("On macOS use the HushUp menu bar app.".into())
 }

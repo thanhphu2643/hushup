@@ -8,9 +8,9 @@ sidebar. Your machine, your schedule.
 
 - `hushup`: Rust CLI + background guard (does all the work)
 - `HushUp.app`: Swift menu bar app on top of the CLI (macOS)
-- `HushUp.exe`: Tauri 2 app on top of the same core (Windows)
+- `HushUp.exe` / `HushUp` (.deb): Tauri 2 app on top of the same core (Windows, Linux)
 
-Platforms: **macOS** and **Windows**. Linux is next (see Roadmap).
+Platforms: **macOS**, **Windows**, **Linux** (Ubuntu, Linux Mint and other apt-based desktops).
 
 ## How it works (macOS)
 
@@ -43,6 +43,22 @@ backed up first and put back exactly by `restore`:
 A `HushUp` scheduled task (SYSTEM, hourly) re-applies them. No hosts-file block on
 Windows: Defender treats that as `HostsFileHijack`. Windows Home may ignore some policies.
 
+## How it works (Linux)
+
+Only the distro's own switches, each undone by `restore`:
+
+| Piece | Ubuntu | Mint | How |
+|---|---|---|---|
+| apt auto-update / unattended-upgrades | ✓ | ✓ | `APT::Periodic::* "0"` in `/etc/apt/apt.conf.d/99hushup` |
+| Snap auto-refresh | ✓ | | `snap refresh --hold` |
+| New-release prompts | ✓ | | `Prompt=never` in `/etc/update-manager/release-upgrades` |
+| Software Updater pop-ups / Update Manager tray & reminders | ✓ | ✓ | per-user autostart override with `Hidden=true` |
+| GNOME Software auto-download | ✓ | | `gsettings set org.gnome.software download-updates false` |
+| Ubuntu Pro ads in apt | ✓ | | `pro config set apt_news=false` |
+| Mint automatic upgrades (if enabled) | | ✓ | its systemd timers disabled |
+
+A `hushup.timer` systemd unit re-applies the system-wide parts hourly.
+
 ## Install
 
 Download from [Releases](https://github.com/thanhphu2643/hushup/releases/latest).
@@ -52,6 +68,8 @@ Download from [Releases](https://github.com/thanhphu2643/hushup/releases/latest)
   System Settings → Privacy & Security (or `xattr -dr com.apple.quarantine /Applications/HushUp.app`).
 - **Windows**: run `HushUp-…-windows-x64-setup.exe` (SmartScreen: More info → Run anyway),
   open HushUp → **Block Updates**, accept the administrator prompt.
+- **Linux**: `sudo apt install ./hushup_…_amd64.deb`, open HushUp from the app menu →
+  **Block Updates**, enter your password.
 
 ## Build from source
 
@@ -74,12 +92,13 @@ Menu bar app (macOS):
 open dist/HushUp.app
 ```
 
-Desktop app (Windows, Tauri 2):
+Desktop app (Windows, Linux; Tauri 2):
 
 ```sh
 cd desktop
 npx @tauri-apps/cli@2 dev      # run
-npx @tauri-apps/cli@2 build    # → target/release/bundle/nsis/*-setup.exe
+npx @tauri-apps/cli@2 build    # Windows → target/release/bundle/nsis/*-setup.exe
+npx @tauri-apps/cli@2 build --bundles deb   # Linux → target/release/bundle/deb/*.deb
 ```
 
 ## Layout
@@ -89,12 +108,13 @@ src/cli.rs                  CLI (shared by `hushup` and the Windows app)
 src/platform/mod.rs         shared types and helpers, picks the OS module
 src/platform/macos.rs       macOS implementation
 src/platform/windows.rs     Windows implementation
+src/platform/linux.rs       Linux (apt-based) implementation
 src/platform/unsupported.rs placeholder for other OSes
 app/                        Swift menu bar app (macOS)
-desktop/                    Tauri 2 app (Windows); its exe doubles as the CLI
+desktop/                    Tauri 2 app (Windows, Linux); its exe doubles as the CLI
 scripts/bundle-app.sh       builds HushUp.app
 scripts/make-dmg.sh         packs it into a DMG
-.github/workflows/release.yml  tag v* → DMG + Windows installer on GitHub Releases
+.github/workflows/release.yml  tag v* → DMG + Windows installer + .deb on GitHub Releases
 ```
 
 Adding an OS = a new `src/platform/<os>.rs` with the same functions.
@@ -102,7 +122,7 @@ Adding an OS = a new `src/platform/<os>.rs` with the same functions.
 ## Roadmap
 
 - Windows: tray icon, code signing, list pending updates
-- Linux: unattended-upgrades / dnf-automatic / PackageKit / GNOME Software notifications
+- Linux: Fedora (dnf-automatic, PackageKit), KDE Discover, Flatpak auto-updates
 - macOS: SMAppService privileged helper instead of the AppleScript password prompt; notarized release
 
 ## Caveats

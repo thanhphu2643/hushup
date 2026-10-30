@@ -23,3 +23,16 @@ hides update notifications, through Windows Update policies (restored exactly by
 
 `hushup-x.y.z-windows-x64.exe` is the command-line tool alone (`hushup status`,
 `hushup apply --daemon` from an administrator terminal).
+
+## Linux (Ubuntu 22.04+, Linux Mint 21+, x64)
+
+1. Download **hushup_x.y.z_amd64.deb** and install it:
+   `sudo apt install ./hushup_x.y.z_amd64.deb` (or double-click it).
+2. Open HushUp from the app menu → **Block Updates** and enter your password.
+
+Uses only official switches: apt periodic updates and unattended-upgrades off, snap
+refreshes held, new-release prompts off, Software Updater / Update Manager
+autostart hidden, GNOME Software auto-downloads off. Notifiers that are already
+running stop right away; everything is back after **Restore Updates** and a re-login.
+
+`hushup-x.y.z-linux-x64` is the command-line tool alone (`sudo ./hushup-… apply --daemon`).
