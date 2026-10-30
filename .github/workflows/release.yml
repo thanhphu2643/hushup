@@ -1,0 +1,27 @@
+name: release
+
+# Push a tag like v0.1.0 (matching Cargo.toml) to publish a DMG on the Releases page.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
+      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - run: cargo test
+      - run: UNIVERSAL=1 ./scripts/bundle-app.sh
+      - run: ./scripts/make-dmg.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/HushUp-*.dmg --title "HushUp $GITHUB_REF_NAME" --notes-file .github/release-notes.md

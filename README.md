@@ -27,7 +27,14 @@ on by default. Pass `--block-security-data` only if you really mean it.
 
 To update manually later: `sudo hushup restore`, update, then `apply` again.
 
-## Usage
+## Install
+
+Download the DMG from [Releases](https://github.com/thanhphu2643/hushup/releases/latest),
+drag HushUp to Applications, then click the bell in the menu bar → **Block Updates**.
+The app isn't notarized yet: allow it once in System Settings → Privacy & Security
+(or `xattr -dr com.apple.quarantine /Applications/HushUp.app`).
+
+## Build from source
 
 ```sh
 cargo build --release
@@ -42,6 +49,7 @@ Menu bar app:
 
 ```sh
 ./scripts/bundle-app.sh    # → dist/HushUp.app (ad-hoc signed)
+./scripts/make-dmg.sh      # → dist/HushUp-<version>.dmg
 open dist/HushUp.app
 ```
 
@@ -54,6 +62,8 @@ src/platform/macos.rs       macOS implementation
 src/platform/unsupported.rs placeholder for other OSes
 app/                        Swift menu bar app (SwiftPM)
 scripts/bundle-app.sh       builds HushUp.app
+scripts/make-dmg.sh         packs it into a DMG
+.github/workflows/release.yml  tag v* → universal DMG on GitHub Releases
 ```
 
 Adding an OS = a new `src/platform/<os>.rs` with the same functions.
