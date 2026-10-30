@@ -4,11 +4,13 @@
 //! 2. Badges: drop `RecommendedUpdates` (what System Settings counts for the red
 //!    "1" and the "Software Update Available" row) plus the per-user badge keys.
 //! 3. Hosts: point Apple's update servers at 0.0.0.0 so a scan can't refill them.
-//! 4. Cache: softwareupdated keeps earlier scan results in memory and in
-//!    `/Library/Updates/ProductMetadata.plist`, and the badge survives 1-3 until
-//!    those are flushed too.
+//! 4. Cache: softwareupdated reloads earlier scan results from
+//!    `/Library/Updates/ProductMetadata.plist` every time it starts, so the badge
+//!    survives 1-3 until that file is gone. SIP won't let us restart the daemon,
+//!    but it exits on its own when idle and comes back without the old results.
 //!
-//! A launchd daemon re-runs `enforce` whenever softwareupdated rewrites its prefs.
+//! A launchd daemon re-runs `enforce` whenever softwareupdated rewrites its prefs
+//! or recreates that cache.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -16,8 +18,6 @@ use std::io::Cursor;
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::sleep;
-use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use plist::{Dictionary, Value};
@@ -60,10 +60,6 @@ const INSTALL_PATH: &str = "/usr/local/bin/hushup";
 
 const PRODUCT_METADATA: &str = "/Library/Updates/ProductMetadata.plist";
 const PRODUCT_METADATA_BAK: &str = "/Library/Application Support/hushup/ProductMetadata.plist.bak";
-const FLUSH_MARKER: &str = "/Library/Application Support/hushup/last-flush";
-/// Restarting softwareupdated can rewrite its prefs, which re-triggers the WatchPaths
-/// daemon; this keeps that from turning into a restart loop.
-const FLUSH_COOLDOWN: Duration = Duration::from_secs(600);
 
 static DRY_RUN: AtomicBool = AtomicBool::new(false);
 
@@ -166,7 +162,7 @@ pub fn enforce() -> Result<()> {
 }
 
 /// Idempotent: only writes what drifted, so the WatchPaths daemon doesn't loop on its own writes.
-fn enforce_with(state: &State, force_flush: bool) -> Result<()> {
+fn enforce_with(state: &State, restart: bool) -> Result<()> {
     let su = export(Command::new("defaults"), SU_SYSTEM);
     for key in pref_keys(&state.opts) {
         if su.get(key).and_then(Value::as_boolean) != Some(false) {
@@ -178,40 +174,23 @@ fn enforce_with(state: &State, force_flush: bool) -> Result<()> {
     }
     set_hosts_block(state.opts.hosts)?;
     clear_user_badge()?;
-    flush_cached_updates(force_flush)
+    flush_cached_updates(restart)
 }
 
-/// Makes softwareupdated forget updates it already found. With the hosts block in
-/// place, the rescan it does on restart comes back empty.
-fn flush_cached_updates(force: bool) -> Result<()> {
-    let recent = fs::metadata(FLUSH_MARKER)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .is_some_and(|age| age < FLUSH_COOLDOWN);
-    if (recent && !force) || cached_updates().is_empty() {
+/// Moves softwareupdated's scan cache aside so it comes back empty next start. Only
+/// `apply` also tries to restart it now; the daemon never does, so it can't loop.
+fn flush_cached_updates(restart: bool) -> Result<()> {
+    if !Path::new(PRODUCT_METADATA).exists() {
         return Ok(());
     }
-    write_file(FLUSH_MARKER, "")?;
-    restart_softwareupdated()?;
-    if !cached_updates().is_empty() && Path::new(PRODUCT_METADATA).exists() {
-        // The on-disk cache survived the restart. It's rebuilt by the next real scan.
-        move_file(PRODUCT_METADATA, PRODUCT_METADATA_BAK)?;
-        restart_softwareupdated()?;
+    move_file(PRODUCT_METADATA, PRODUCT_METADATA_BAK)?;
+    if restart {
+        let kickstart = mutate(Command::new("launchctl").args(["kickstart", "-k", "system/com.apple.softwareupdated"]));
+        if kickstart.is_err() && mutate(Command::new("killall").arg("softwareupdated")).is_err() {
+            println!("note: SIP blocks restarting softwareupdated; the badge clears once it idles out (or after a reboot)");
+        }
     }
     mutate(Command::new("killall").arg("Dock")).ok();
-    Ok(())
-}
-
-fn restart_softwareupdated() -> Result<()> {
-    let kickstart = mutate(Command::new("launchctl").args(["kickstart", "-k", "system/com.apple.softwareupdated"]));
-    if kickstart.is_err() {
-        // launchd starts it again on demand.
-        mutate(Command::new("killall").arg("softwareupdated"))?;
-    }
-    if !dry_run() {
-        sleep(Duration::from_secs(5));
-    }
     Ok(())
 }
 
@@ -284,7 +263,7 @@ fn daemon_plist() -> String {
     <key>RunAtLoad</key><true/>
     <key>StartInterval</key><integer>900</integer>
     <key>WatchPaths</key>
-    <array><string>{SU_SYSTEM}.plist</string></array>
+    <array><string>{SU_SYSTEM}.plist</string><string>{PRODUCT_METADATA}</string></array>
 </dict>
 </plist>
 "#

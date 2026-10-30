@@ -20,8 +20,8 @@ Every change is recorded and undone by `hushup restore`.
 | Preferences | `AutomaticCheckEnabled`, `AutomaticDownload`, `AutomaticallyInstallMacOSUpdates` → `false` in `/Library/Preferences/com.apple.SoftwareUpdate` |
 | Badges | Clears `RecommendedUpdates` (what System Settings counts) plus per-user `AvailableUpdatesNotificationCountKey` / `AttentionPrefBundleIDs`, then restarts the Dock |
 | Hosts | Points `swscan`, `swdist`, `swcdn`, `updates.cdn-apple.com`, `gdmf.apple.com` at `0.0.0.0` / `::` so a scan can't refill the list |
-| Cache | Restarts `softwareupdated` (and, if that is not enough, moves `/Library/Updates/ProductMetadata.plist` aside) so it forgets updates found before the block |
-| Guard | launchd daemon re-runs `hushup enforce` every 15 min and whenever softwareupdated rewrites its prefs |
+| Cache | Moves `/Library/Updates/ProductMetadata.plist` (softwareupdated's scan cache) aside; softwareupdated forgets old results the next time it starts. SIP blocks restarting it, so that happens when it idles out or on reboot |
+| Guard | launchd daemon re-runs `hushup enforce` every 15 min and whenever softwareupdated rewrites its prefs or recreates its cache |
 
 Security data (XProtect, `ConfigDataInstall`/`CriticalUpdateInstall`) is left
 on by default. Pass `--block-security-data` only if you really mean it.
