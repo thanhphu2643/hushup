@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HushUp</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5fb; --card: #fff; --text: #1c1b2e; --muted: #6b6a80;
+    --line: #e6e5f0; --accent: #5b57e8; --ok: #22a06b; --bad: #e5484d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17162a; --card: #221f3a; --text: #eceaf8; --muted: #9a98b5;
+      --line: #2f2c4d; --accent: #7c78ff; --ok: #3ccf8e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 24px;
+    display: flex; flex-direction: column; align-items: center;
+    font: 14px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); user-select: none;
+  }
+  img { width: 88px; height: 88px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 14px 0 4px; }
+  .sub { color: var(--muted); text-align: center; margin: 0 0 20px; }
+  .card { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 11px 14px; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .dot {
+    width: 18px; height: 18px; border-radius: 50%; flex: none;
+    display: grid; place-items: center; font-size: 11px; color: #fff; background: var(--muted);
+  }
+  .dot.ok { background: var(--ok); }
+  .error { color: var(--bad); margin-top: 12px; text-align: center; min-height: 1em; }
+  button {
+    margin-top: 18px; width: 100%; padding: 10px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .6; cursor: default; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 10px; text-align: center; }
+</style>
+</head>
+<body>
+  <img src="icon.png" alt="">
+  <h1 id="title">HushUp</h1>
+  <p class="sub" id="sub">Checking…</p>
+  <div class="card" id="rows"></div>
+  <div class="error" id="error"></div>
+  <button id="action" disabled>…</button>
+  <p class="note">Windows asks for administrator permission each time you switch.</p>
+<script>
+  const { invoke } = window.__TAURI__.core;
+  const $ = (id) => document.getElementById(id);
+  let blocked = false;
+
+  function row(label, ok) {
+    const el = document.createElement('div');
+    el.className = 'row';
+    const text = document.createElement('span');
+    text.textContent = label;
+    const dot = document.createElement('span');
+    dot.className = ok ? 'dot ok' : 'dot';
+    dot.textContent = ok ? '✓' : '–';
+    el.append(text, dot);
+    return el;
+  }
+
+  function render(s) {
+    blocked = s.applied && s.daemon_installed;
+    $('title').textContent = blocked ? 'Updates are blocked' : 'Updates are allowed';
+    $('sub').textContent = blocked
+      ? "Windows won't download, install or nag you about updates."
+      : 'Windows Update runs and notifies as usual.';
+    $('rows').replaceChildren(
+      row('Automatic updates off', !s.auto_check),
+      row('Pinned to the installed Windows version', !s.auto_install_os),
+      row('Update notifications hidden', s.notifications_hidden),
+      row('Background guard (hourly)', s.daemon_installed),
+    );
+    const btn = $('action');
+    btn.disabled = false;
+    btn.textContent = blocked ? 'Restore Updates' : 'Block Updates';
+    btn.className = blocked ? '' : 'primary';
+  }
+
+  async function refresh() {
+    try {
+      render(await invoke('status'));
+    } catch (e) {
+      $('error').textContent = e;
+    }
+  }
+
+  $('action').addEventListener('click', async () => {
+    const btn = $('action');
+    btn.disabled = true;
+    btn.textContent = 'Waiting for permission…';
+    $('error').textContent = '';
+    try {
+      await invoke(blocked ? 'restore' : 'block');
+    } catch (e) {
+      $('error').textContent = e;
+    }
+    await refresh();
+  });
+
+  refresh();
+</script>
+</body>
+</html>

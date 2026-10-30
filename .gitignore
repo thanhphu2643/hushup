@@ -2,3 +2,5 @@ target/
 dist/
 app/.build/
 .DS_Store
+desktop/target/
+desktop/gen/

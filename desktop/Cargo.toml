@@ -1,0 +1,21 @@
+[package]
+name = "hushup-desktop"
+version = "0.2.0"
+edition = "2021"
+description = "HushUp desktop app (Windows; macOS uses the Swift menu bar app)"
+license = "MIT"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+hushup = { path = ".." }
+tauri = { version = "2", features = [] }
+
+[profile.release]
+strip = true
+lto = true
+
+# Standalone: keeps Tauri's dependency tree out of the CLI's Cargo.lock.
+[workspace]

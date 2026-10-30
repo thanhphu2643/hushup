@@ -7,9 +7,10 @@ System Settings in the Dock and the **Software Update Available** row in its
 sidebar. Your machine, your schedule.
 
 - `hushup`: Rust CLI + background guard (does all the work)
-- `HushUp.app`: Swift menu bar app on top of the CLI
+- `HushUp.app`: Swift menu bar app on top of the CLI (macOS)
+- `HushUp.exe`: Tauri 2 app on top of the same core (Windows)
 
-Platforms: **macOS** now. Windows and Linux are next (see Roadmap).
+Platforms: **macOS** and **Windows**. Linux is next (see Roadmap).
 
 ## How it works (macOS)
 
@@ -27,12 +28,30 @@ on by default. Pass `--block-security-data` only if you really mean it.
 
 To update manually later: `sudo hushup restore`, update, then `apply` again.
 
+## How it works (Windows)
+
+Windows Update group policies in `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate`,
+backed up first and put back exactly by `restore`:
+
+| Policy | Effect |
+|---|---|
+| `AU\NoAutoUpdate=1`, `AU\AUOptions=2` | No automatic download/install; notify-only if re-enabled |
+| `TargetReleaseVersion` + `ProductVersion` + `TargetReleaseVersionInfo` | Pinned to the installed feature release (e.g. Windows 11 24H2) |
+| `SetUpdateNotificationLevel=1`, `UpdateNotificationLevel=2` | Update notifications and restart warnings hidden |
+| `AU\NoAutoRebootWithLoggedOnUsers=1` | No forced restart while you're signed in |
+
+A `HushUp` scheduled task (SYSTEM, hourly) re-applies them. No hosts-file block on
+Windows: Defender treats that as `HostsFileHijack`. Windows Home may ignore some policies.
+
 ## Install
 
-Download the DMG from [Releases](https://github.com/thanhphu2643/hushup/releases/latest),
-drag HushUp to Applications, then click the bell in the menu bar → **Block Updates**.
-The app isn't notarized yet: allow it once in System Settings → Privacy & Security
-(or `xattr -dr com.apple.quarantine /Applications/HushUp.app`).
+Download from [Releases](https://github.com/thanhphu2643/hushup/releases/latest).
+
+- **macOS**: open the DMG, drag HushUp to Applications, then click the bell in the
+  menu bar → **Block Updates**. The app isn't notarized yet: allow it once in
+  System Settings → Privacy & Security (or `xattr -dr com.apple.quarantine /Applications/HushUp.app`).
+- **Windows**: run `HushUp-…-windows-x64-setup.exe` (SmartScreen: More info → Run anyway),
+  open HushUp → **Block Updates**, accept the administrator prompt.
 
 ## Build from source
 
@@ -42,10 +61,12 @@ cargo build --release
 sudo ./target/release/hushup apply --dry-run   # preview every change
 sudo ./target/release/hushup apply             # --no-hosts to skip /etc/hosts
 sudo ./target/release/hushup install-daemon    # copies itself to /usr/local/bin
-sudo hushup uninstall-daemon && sudo hushup restore
+sudo hushup restore --daemon                   # undo everything, guard included
 ```
 
-Menu bar app:
+On Windows, run the same commands from an administrator terminal (no `sudo`).
+
+Menu bar app (macOS):
 
 ```sh
 ./scripts/bundle-app.sh    # → dist/HushUp.app (ad-hoc signed)
@@ -53,24 +74,34 @@ Menu bar app:
 open dist/HushUp.app
 ```
 
+Desktop app (Windows, Tauri 2):
+
+```sh
+cd desktop
+npx @tauri-apps/cli@2 dev      # run
+npx @tauri-apps/cli@2 build    # → target/release/bundle/nsis/*-setup.exe
+```
+
 ## Layout
 
 ```
-src/main.rs                 CLI
-src/platform/mod.rs         shared types, picks the OS module
+src/cli.rs                  CLI (shared by `hushup` and the Windows app)
+src/platform/mod.rs         shared types and helpers, picks the OS module
 src/platform/macos.rs       macOS implementation
+src/platform/windows.rs     Windows implementation
 src/platform/unsupported.rs placeholder for other OSes
-app/                        Swift menu bar app (SwiftPM)
+app/                        Swift menu bar app (macOS)
+desktop/                    Tauri 2 app (Windows); its exe doubles as the CLI
 scripts/bundle-app.sh       builds HushUp.app
 scripts/make-dmg.sh         packs it into a DMG
-.github/workflows/release.yml  tag v* → universal DMG on GitHub Releases
+.github/workflows/release.yml  tag v* → DMG + Windows installer on GitHub Releases
 ```
 
 Adding an OS = a new `src/platform/<os>.rs` with the same functions.
 
 ## Roadmap
 
-- Windows: Windows Update policies (`NoAutoUpdate`, `TargetReleaseVersion`), pause/`wuauserv`, toast suppression; GUI likely Tauri 2
+- Windows: tray icon, code signing, list pending updates
 - Linux: unattended-upgrades / dnf-automatic / PackageKit / GNOME Software notifications
 - macOS: SMAppService privileged helper instead of the AppleScript password prompt; notarized release
 
@@ -86,7 +117,7 @@ Adding an OS = a new `src/platform/<os>.rs` with the same functions.
 - Skipping updates means skipping security fixes. Re-enable regularly.
 - Apple changes where the badge comes from between macOS versions; open an
   issue with `hushup status` output if a badge survives.
-- MDM-managed Macs may enforce updates regardless.
+- MDM-managed Macs and Intune/domain-managed PCs may enforce updates regardless.
 
 ## License
 

@@ -1,6 +1,7 @@
 name: release
 
-# Push a tag like v0.1.0 (matching Cargo.toml) to publish a DMG on the Releases page.
+# Push a tag like v0.2.0 (matching both Cargo.toml files) to publish the macOS DMG
+# and the Windows installer on the Releases page.
 on:
   push:
     tags: ["v*"]
@@ -9,19 +10,82 @@ permissions:
   contents: write
 
 jobs:
-  dmg:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches Cargo.toml versions
+        run: |
+          for f in Cargo.toml desktop/Cargo.toml; do
+            v=$(sed -n 's/^version = "\(.*\)"/\1/p' "$f" | head -1)
+            test "v$v" = "$GITHUB_REF_NAME" || { echo "$f is v$v, tag is $GITHUB_REF_NAME"; exit 1; }
+          done
+
+  macos:
+    needs: version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check tag matches Cargo.toml
-        run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
       - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - run: cargo test
       - run: UNIVERSAL=1 ./scripts/bundle-app.sh
       - run: ./scripts/make-dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/HushUp-*.dmg
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test
+      - run: cargo build --release
+      # The runner is an elevated, throwaway VM: exercise the real registry and task changes.
+      - name: Apply, check, restore
+        run: |
+          hushup=target/release/hushup.exe
+          $hushup apply --daemon
+          $hushup status
+          s=$($hushup status --json)
+          grep -q '"auto_check":false' <<<"$s"
+          grep -q '"auto_install_os":false' <<<"$s"
+          grep -q '"notifications_hidden":true' <<<"$s"
+          grep -q '"daemon_installed":true' <<<"$s"
+          $hushup restore --daemon
+          s=$($hushup status --json)
+          echo "$s"
+          grep -q '"applied":false' <<<"$s"
+          grep -q '"auto_check":true' <<<"$s"
+          grep -q '"daemon_installed":false' <<<"$s"
+      - name: Build installer
+        working-directory: desktop
+        run: npx --yes @tauri-apps/cli@2 build
+      - name: Collect
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          mkdir out
+          cp desktop/target/release/bundle/nsis/*-setup.exe "out/HushUp-$v-windows-x64-setup.exe"
+          cp target/release/hushup.exe "out/hushup-$v-windows-x64.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/*
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/HushUp-*.dmg --title "HushUp $GITHUB_REF_NAME" --notes-file .github/release-notes.md
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "HushUp $GITHUB_REF_NAME" --notes-file .github/release-notes.md

@@ -16,13 +16,12 @@ use std::fs;
 use std::io::Cursor;
 use std::path::Path;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{bail, Context, Result};
 use plist::{Dictionary, Value};
 use serde::{Deserialize, Serialize};
 
-use super::{Opts, Status};
+use super::{dry_run, mutate, output, remove_file, write_file, Opts, Status};
 
 const SU_SYSTEM: &str = "/Library/Preferences/com.apple.SoftwareUpdate";
 const SU_USER: &str = "com.apple.SoftwareUpdate";
@@ -51,21 +50,10 @@ const HOSTS: &str = "/etc/hosts";
 const HOSTS_BEGIN: &str = "# >>> hushup";
 const HOSTS_END: &str = "# <<< hushup";
 
-const STATE_DIR: &str = "/Library/Application Support/hushup";
 const STATE_FILE: &str = "/Library/Application Support/hushup/state.json";
 const DAEMON_LABEL: &str = "io.github.hushup";
 const DAEMON_PLIST: &str = "/Library/LaunchDaemons/io.github.hushup.plist";
 const INSTALL_PATH: &str = "/usr/local/bin/hushup";
-
-static DRY_RUN: AtomicBool = AtomicBool::new(false);
-
-pub fn set_dry_run(on: bool) {
-    DRY_RUN.store(on, Ordering::Relaxed);
-}
-
-fn dry_run() -> bool {
-    DRY_RUN.load(Ordering::Relaxed)
-}
 
 #[derive(Default, Serialize, Deserialize)]
 struct State {
@@ -127,6 +115,7 @@ pub fn status() -> Result<Status> {
         auto_check: on("AutomaticCheckEnabled"),
         auto_download: on("AutomaticDownload"),
         auto_install_os: on("AutomaticallyInstallMacOSUpdates"),
+        notifications_hidden: pending_updates.is_empty() && notification_count == 0,
         pending_updates,
         notification_count,
         hosts_blocked: fs::read_to_string(HOSTS).is_ok_and(|s| s.contains(HOSTS_BEGIN)),
@@ -345,45 +334,6 @@ fn require_root() -> Result<()> {
         bail!("this needs root, re-run with sudo");
     }
     Ok(())
-}
-
-fn output(cmd: &mut Command) -> Result<String> {
-    let out = cmd.output().with_context(|| format!("running {cmd:?}"))?;
-    if !out.status.success() {
-        bail!("{cmd:?} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-/// Every system change goes through these three so `--dry-run` covers them all.
-fn mutate(cmd: &mut Command) -> Result<()> {
-    if dry_run() {
-        println!("would run: {cmd:?}");
-        return Ok(());
-    }
-    output(cmd).map(drop)
-}
-
-fn write_file(path: &str, contents: &str) -> Result<()> {
-    if dry_run() {
-        println!("would write {path}:\n{contents}");
-        return Ok(());
-    }
-    if path.starts_with(STATE_DIR) {
-        fs::create_dir_all(STATE_DIR)?;
-    }
-    fs::write(path, contents).with_context(|| format!("writing {path}"))
-}
-
-fn remove_file(path: &str) -> Result<()> {
-    if dry_run() {
-        println!("would remove {path}");
-        return Ok(());
-    }
-    match fs::remove_file(path) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e).with_context(|| format!("removing {path}")),
-        _ => Ok(()),
-    }
 }
 
 #[cfg(test)]
