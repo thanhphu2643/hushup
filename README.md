@@ -20,8 +20,7 @@ Every change is recorded and undone by `hushup restore`.
 | Preferences | `AutomaticCheckEnabled`, `AutomaticDownload`, `AutomaticallyInstallMacOSUpdates` → `false` in `/Library/Preferences/com.apple.SoftwareUpdate` |
 | Badges | Clears `RecommendedUpdates` (what System Settings counts) plus per-user `AvailableUpdatesNotificationCountKey` / `AttentionPrefBundleIDs`, then restarts the Dock |
 | Hosts | Points `swscan`, `swdist`, `swcdn`, `updates.cdn-apple.com`, `gdmf.apple.com` at `0.0.0.0` / `::` so a scan can't refill the list |
-| Cache | Moves `/Library/Updates/ProductMetadata.plist` (softwareupdated's scan cache) aside; softwareupdated forgets old results the next time it starts. SIP blocks restarting it, so that happens when it idles out or on reboot |
-| Guard | launchd daemon re-runs `hushup enforce` every 15 min and whenever softwareupdated rewrites its prefs or recreates its cache |
+| Guard | launchd daemon re-runs `hushup enforce` every 15 min and whenever softwareupdated rewrites its prefs |
 
 Security data (XProtect, `ConfigDataInstall`/`CriticalUpdateInstall`) is left
 on by default. Pass `--block-security-data` only if you really mean it.
@@ -66,6 +65,13 @@ Adding an OS = a new `src/platform/<os>.rs` with the same functions.
 - macOS: SMAppService privileged helper instead of the AppleScript password prompt; notarized release
 
 ## Caveats
+
+- Updates macOS found **before** you ran `apply` stay in softwareupdated's
+  cache (`/Library/Updates`, protected by SIP) and keep the badge until they're
+  installed. `hushup status` lists them. Install them once, e.g. for a
+  Command Line Tools update:
+  `sudo hushup restore && softwareupdate -i "<label>" && sudo hushup apply`
+  (`softwareupdate --list --no-scan` shows the label). New ones won't show up.
 
 - Skipping updates means skipping security fixes. Re-enable regularly.
 - Apple changes where the badge comes from between macOS versions; open an
