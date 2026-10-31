@@ -1,6 +1,7 @@
 // Draws the HushUp icons from code so there are no binary sources to keep in sync.
 // Usage: swift scripts/make-icons.swift app/Resources
-// Output: AppIcon.icns, menubar-on(.png|@2x.png), menubar-off(.png|@2x.png)
+// Output: AppIcon.icns, menubar-on(.png|@2x.png), menubar-off(.png|@2x.png), plus docs/icon.png
+// and the iOS icon in ios/HushUp/Assets.xcassets
 import AppKit
 
 let out = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "app/Resources")
@@ -57,6 +58,15 @@ func render(px: Int, _ draw: (CGContext, CGFloat) -> Void) -> Data {
     return rep.representation(using: .png, properties: [:])!
 }
 
+/// Re-encodes a PNG without its alpha channel (App Store icons must be opaque).
+func opaque(_ png: Data) -> Data {
+    let image = NSBitmapImageRep(data: png)!.cgImage!
+    let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    return NSBitmapImageRep(cgImage: ctx.makeImage()!).representation(using: .png, properties: [:])!
+}
+
 func color(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
     CGColor(srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
             blue: CGFloat(hex & 0xFF) / 255, alpha: a)
@@ -94,6 +104,20 @@ func appIcon(_ ctx: CGContext, _ size: CGFloat) {
     ctx.restoreGState()
 }
 
+/// iOS: opaque full-bleed square (iOS rounds the corners itself), same glyph proportions.
+func iosIcon(_ ctx: CGContext, _ size: CGFloat) {
+    let s = size / 1024
+    let tile = CGRect(x: 0, y: 0, width: size, height: size)
+    linear(ctx, CGPath(rect: tile, transform: nil), color(0x6D6AF6), color(0x221D5C), tile)
+    let glyph = CGRect(x: 164 * s, y: 152 * s, width: 696 * s, height: 696 * s)
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: -10 * s), blur: 30 * s, color: color(0x0F0A3C, 0.45))
+    drawGlyph(ctx, in: glyph, slashed: true) { ctx, path in
+        linear(ctx, path, color(0xFFFFFF), color(0xC7D2FE), glyph)
+    }
+    ctx.restoreGState()
+}
+
 func menuBarIcon(slashed: Bool) -> (CGContext, CGFloat) -> Void {
     { ctx, size in
         let inset = size * 0.04
@@ -125,4 +149,8 @@ for (name, slashed) in [("menubar-on", true), ("menubar-off", false)] {
     try render(px: 36, menuBarIcon(slashed: slashed)).write(to: out.appendingPathComponent("\(name)@2x.png"))
 }
 try render(px: 1024, appIcon).write(to: out.appendingPathComponent("../../docs/icon.png"))
+let assets = out.appendingPathComponent("../../ios/HushUp/Assets.xcassets")
+for dir in ["AppIcon.appiconset", "Icon.imageset"] {
+    try opaque(render(px: 1024, iosIcon)).write(to: assets.appendingPathComponent(dir).appendingPathComponent("icon-1024.png"))
+}
 print("icons written to \(out.path)")

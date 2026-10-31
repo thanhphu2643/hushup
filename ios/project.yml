@@ -1,0 +1,74 @@
+# Xcode project for the iOS app. Regenerate with `xcodegen` after adding files.
+name: HushUp
+options:
+  bundleIdPrefix: io.github.hushup
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    MARKETING_VERSION: 0.4.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: 5.0
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: "" # set your team in Xcode → Signing & Capabilities
+targets:
+  HushUp:
+    type: application
+    platform: iOS
+    sources: [HushUp, Shared]
+    dependencies:
+      - target: HushUpTunnel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.hushup.ios
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: HushUp
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: HushUp/HushUp.entitlements
+  HushUpTunnel:
+    type: app-extension
+    platform: iOS
+    sources: [HushUpTunnel, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.hushup.ios.tunnel
+        INFOPLIST_FILE: HushUpTunnel/Info.plist
+        CODE_SIGN_ENTITLEMENTS: HushUpTunnel/HushUpTunnel.entitlements
+  # Same app without the tunnel, for free Apple IDs (they can't sign Network
+  # Extensions): guides through a NextDNS profile and checks that it works.
+  HushUpFree:
+    type: application
+    platform: iOS
+    sources: [HushUp, Shared]
+    settings:
+      base:
+        PRODUCT_NAME: HushUp
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.hushup.ios.free
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: HushUp
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) NO_TUNNEL
+  HushUpTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests, Shared]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  HushUp:
+    build:
+      targets:
+        HushUp: all
+    test:
+      targets: [HushUpTests]
+  HushUpFree:
+    build:
+      targets:
+        HushUpFree: all
